@@ -335,6 +335,7 @@ module tb_pcie_top;
     .dut_tx_data       (pipe_tx_data),
     .dut_tx_datak      (pipe_tx_datak),
     .dut_tx_elec_idle  (pipe_tx_elec_idle),
+    .ltssm_state       (ltssm_state),
     .link_established  (rc_link_up),
     .tlp_rx_count      (rc_tlp_rx_count),
     .cpl_tx_count      (rc_cpl_tx_count),

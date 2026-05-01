@@ -49,6 +49,11 @@ module pcie_rc_bfm
   input  logic [NUM_LANES-1:0]               dut_tx_elec_idle,
 
   // -------------------------------------------------------------------------
+  // DUT LTSSM state (for reactive training sequence)
+  // -------------------------------------------------------------------------
+  input  ltssm_state_e      ltssm_state,
+
+  // -------------------------------------------------------------------------
   // Status and scoreboard
   // -------------------------------------------------------------------------
   output logic              link_established,
@@ -60,42 +65,33 @@ module pcie_rc_bfm
   // ---------------------------------------------------------------------------
   // PIPE K-code definitions
   // ---------------------------------------------------------------------------
-  localparam logic [7:0] COM  = 8'hBC;
-  localparam logic [7:0] STP  = 8'hFB;
-  localparam logic [7:0] END_ = 8'hFD;
+  localparam logic [7:0] COM    = 8'hBC;
+  localparam logic [7:0] STP    = 8'hFB;
+  localparam logic [7:0] END_   = 8'hFD;
+  localparam logic [7:0] IDL    = 8'h7C;
   localparam logic [7:0] TS1_ID = 8'h4A;
   localparam logic [7:0] TS2_ID = 8'h45;
 
   // ---------------------------------------------------------------------------
-  // BFM State Machine
+  // Reactive Link Training
   // ---------------------------------------------------------------------------
-  typedef enum logic [3:0] {
-    BFM_DETECT,
-    BFM_POLL_SEND_TS1,
-    BFM_POLL_RECV_TS1,
-    BFM_POLL_SEND_TS2,
-    BFM_POLL_RECV_TS2,
-    BFM_CONFIG,
-    BFM_L0,
-    BFM_SEND_TLP,
-    BFM_WAIT_CPL
-  } bfm_state_e;
-
-  bfm_state_e   bfm_state;
-  logic [15:0]  bfm_timer;
-  logic [7:0]   ts_cnt;
-  logic [7:0]   idle_cnt;
-
-  // ---------------------------------------------------------------------------
-  // Link Training
+  // The BFM mirrors what the DUT LTSSM expects to receive:
+  //   DETECT states          → assert Receiver-Detected status
+  //   POLLING_ACTIVE /
+  //     CONFIG_LWIDTH_*  /
+  //     CONFIG_LANENUM_WAIT /
+  //     RECOVERY_RCVRLOCK   → send TS1 ordered sets
+  //   POLLING_CONFIGURATION /
+  //     CONFIG_LANENUM_ACCEPT /
+  //     RECOVERY_RCVRCFG    → send TS2 ordered sets
+  //   CONFIG_COMPLETE /
+  //     CONFIG_IDLE /
+  //     RECOVERY_IDLE       → send IDL (electrical idle ordered set)
+  //   L0 and sub-states     → send COM (idle)
   // ---------------------------------------------------------------------------
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      bfm_state        <= BFM_DETECT;
       link_established <= 1'b0;
-      bfm_timer        <= '0;
-      ts_cnt           <= '0;
-      idle_cnt         <= '0;
       tlp_rx_count     <= '0;
       cpl_tx_count     <= '0;
       bfm_error        <= 1'b0;
@@ -108,93 +104,95 @@ module pcie_rc_bfm
         rc_tx_status_valid[i] <= 1'b0;
       end
     end else begin
-      bfm_timer <= bfm_timer + 1;
+      // -----------------------------------------------------------------------
+      // Reactive training: mirror exactly what the DUT LTSSM needs to see
+      // -----------------------------------------------------------------------
+      link_established <= (ltssm_state == L0);
 
-      case (bfm_state)
+      if (ltssm_state == L0 && !link_established)
+        $display("[RC-BFM] Link established at time %0t", $time);
 
-        BFM_DETECT: begin
-          // Assert receiver detected
-          for (int i = 0; i < NUM_LANES; i++) begin
+      // TLP detection (valid in L0)
+      if (ltssm_state == L0 &&
+          dut_tx_datak[0][0] && (dut_tx_data[0][7:0] == STP)) begin
+        tlp_rx_count <= tlp_rx_count + 1;
+        $display("[RC-BFM] Received TLP from DUT at time %0t (count=%0d)",
+                 $time, tlp_rx_count + 1);
+      end
+
+      for (int i = 0; i < NUM_LANES; i++) begin
+        rc_tx_elec_idle[i] <= 1'b0;  // always driven, no electrical idle
+        case (ltssm_state)
+
+          // -------------------------------------------------------------------
+          // Detect: assert Receiver Detected on status, hold data idle
+          // -------------------------------------------------------------------
+          DETECT_QUIET: begin
+            rc_tx_data[i]         <= '0;
+            rc_tx_datak[i]        <= '0;
+            rc_tx_valid[i]        <= 1'b0;
             rc_tx_status[i]       <= 3'b001;   // Receiver Detected
             rc_tx_status_valid[i] <= 1'b1;
-            rc_tx_elec_idle[i]    <= 1'b0;
           end
-          if (bfm_timer >= 16'd100) begin
-            bfm_state <= BFM_POLL_SEND_TS1;
-            bfm_timer <= '0;
-          end
-        end
 
-        BFM_POLL_SEND_TS1: begin
-          // Send TS1 ordered sets
-          for (int i = 0; i < NUM_LANES; i++) begin
+          DETECT_ACTIVE: begin
             rc_tx_data[i]         <= {(PIPE_W/8){TS1_ID}};
             rc_tx_datak[i]        <= '0;
             rc_tx_valid[i]        <= 1'b1;
-            rc_tx_elec_idle[i]    <= 1'b0;
             rc_tx_status[i]       <= 3'b001;
             rc_tx_status_valid[i] <= 1'b1;
           end
-          ts_cnt <= ts_cnt + 1;
-          if (ts_cnt >= 8'd16) begin
-            bfm_state <= BFM_POLL_SEND_TS2;
-            ts_cnt    <= '0;
-          end
-        end
 
-        BFM_POLL_SEND_TS2: begin
-          // Send TS2 ordered sets
-          for (int i = 0; i < NUM_LANES; i++) begin
+          // -------------------------------------------------------------------
+          // States that require TS1 from the RC side
+          // -------------------------------------------------------------------
+          POLLING_ACTIVE,
+          CONFIG_LWIDTH_START, CONFIG_LWIDTH_ACCEPT,
+          CONFIG_LANENUM_WAIT,
+          RECOVERY_RCVRLOCK: begin
+            rc_tx_data[i]         <= {(PIPE_W/8){TS1_ID}};
+            rc_tx_datak[i]        <= '0;
+            rc_tx_valid[i]        <= 1'b1;
+            rc_tx_status[i]       <= 3'b001;
+            rc_tx_status_valid[i] <= 1'b1;
+          end
+
+          // -------------------------------------------------------------------
+          // States that require TS2 from the RC side
+          // -------------------------------------------------------------------
+          POLLING_CONFIGURATION, POLLING_SPEED,
+          CONFIG_LANENUM_ACCEPT, CONFIG_COMPLETE,
+          RECOVERY_RCVRCFG: begin
             rc_tx_data[i]         <= {(PIPE_W/8){TS2_ID}};
             rc_tx_datak[i]        <= '0;
             rc_tx_valid[i]        <= 1'b1;
-            rc_tx_status[i]       <= 3'b010;  // TS2 status
+            rc_tx_status[i]       <= 3'b010;
             rc_tx_status_valid[i] <= 1'b1;
           end
-          ts_cnt <= ts_cnt + 1;
-          if (ts_cnt >= 8'd16) begin
-            bfm_state <= BFM_CONFIG;
-            ts_cnt    <= '0;
-          end
-        end
 
-        BFM_CONFIG: begin
-          // Send IDL (idle) symbols to complete config
-          for (int i = 0; i < NUM_LANES; i++) begin
-            rc_tx_data[i]         <= {(PIPE_W/8){8'h7C}};  // IDL
+          // -------------------------------------------------------------------
+          // Config/Recovery idle: send IDL ordered set
+          // -------------------------------------------------------------------
+          CONFIG_IDLE, RECOVERY_IDLE: begin
+            rc_tx_data[i]         <= {(PIPE_W/8){IDL}};
             rc_tx_datak[i]        <= '1;
             rc_tx_valid[i]        <= 1'b1;
             rc_tx_status[i]       <= 3'b000;
             rc_tx_status_valid[i] <= 1'b1;
           end
-          idle_cnt <= idle_cnt + 1;
-          if (idle_cnt >= 8'd16) begin
-            bfm_state        <= BFM_L0;
-            link_established <= 1'b1;
-            idle_cnt         <= '0;
-            $display("[RC-BFM] Link established at time %0t", $time);
-          end
-        end
 
-        BFM_L0: begin
-          // In L0: send idle COM symbols and listen for TLPs from DUT
-          for (int i = 0; i < NUM_LANES; i++) begin
-            rc_tx_data[i]  <= {(PIPE_W/8){COM}};
-            rc_tx_datak[i] <= '1;
-            rc_tx_valid[i] <= 1'b1;
+          // -------------------------------------------------------------------
+          // L0 and power-management sub-states: send COM (idle)
+          // -------------------------------------------------------------------
+          default: begin
+            rc_tx_data[i]         <= {(PIPE_W/8){COM}};
+            rc_tx_datak[i]        <= '1;
+            rc_tx_valid[i]        <= 1'b1;
             rc_tx_status[i]       <= 3'b000;
             rc_tx_status_valid[i] <= 1'b0;
           end
-          // Watch for TLPs from DUT
-          if (dut_tx_datak[0][0] && (dut_tx_data[0][7:0] == STP)) begin
-            tlp_rx_count <= tlp_rx_count + 1;
-            $display("[RC-BFM] Received TLP from DUT at time %0t (count=%0d)",
-                     $time, tlp_rx_count+1);
-          end
-        end
-
-        default: bfm_state <= BFM_DETECT;
-      endcase
+        endcase
+      end
     end
   end
 

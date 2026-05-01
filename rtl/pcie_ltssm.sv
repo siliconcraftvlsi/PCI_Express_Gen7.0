@@ -118,8 +118,10 @@ module pcie_ltssm
           rx_ts2_detected[i] <= 1'b0;
         end
       end
-      // TS consecutive count
-      if (all_lanes_rx_ts2)
+      // TS consecutive count – increment on TS1 or TS2 so that states
+      // checking ts_count during TS1 reception (e.g. POLLING_ACTIVE,
+      // RECOVERY_RCVRLOCK) work correctly, not just TS2-gated states.
+      if (all_lanes_rx_ts1 || all_lanes_rx_ts2)
         ts_count <= ts_count + 1;
       else
         ts_count <= '0;
