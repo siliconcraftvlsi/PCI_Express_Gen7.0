@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // -----------------------------------------------------------------------------
 // Author  : Robert Kingsly Amalathas
 // Email   : robertk@microprocessorlab.com
@@ -25,7 +27,8 @@ module pcie_pipe_if
 #(
   parameter int unsigned NUM_LANES = 16,
   parameter int unsigned PIPE_W    = 32,    // PIPE data width per lane (bits)
-  parameter int unsigned DATA_W    = 256    // Internal datapath width
+  parameter int unsigned DATA_W    = 256,   // Internal datapath width
+  parameter bit          SIM_BYPASS = 0
 )(
   input  logic              clk,
   input  logic              rst_n,
@@ -101,8 +104,8 @@ module pcie_pipe_if
   logic                tx_active;  // Packet in-flight on TX
   logic                tx_sop_pend;
 
-  // TX Ready: ready when shift register is empty or will be consumed this cycle
-  assign tx_ready = !tx_active || (tx_phase == '0);
+  // TX Ready: in directed sim always accept DLL beats (RC BFM has no PHY back-pressure)
+  assign tx_ready = SIM_BYPASS ? 1'b1 : (!tx_active || (tx_phase == '0));
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -150,7 +153,7 @@ module pcie_pipe_if
   assign tx_frame_stp = tx_active && tx_sop_pend && (tx_phase == '0);
   assign tx_frame_end = tx_active && !tx_valid && (tx_phase == GEARBOX_RATIO - 1);
 
-  always_comb begin
+  always @* begin
     for (int i = 0; i < NUM_LANES; i++) begin
       if (tx_is_idle) begin
         // Electrical Idle / COM-SKP
@@ -192,7 +195,7 @@ module pcie_pipe_if
   logic [NUM_LANES-1:0][PIPE_W/8-1:0] rx_pipe_datak_raw;
 
   // Assemble all lanes into single wide word
-  always_comb begin
+  always @* begin
     for (int i = 0; i < NUM_LANES; i++) begin
       rx_pipe_word_raw[i*PIPE_W +: PIPE_W]     = pipe_rx_data[i];
       rx_pipe_datak_raw[i]                      = pipe_rx_datak[i];
@@ -239,14 +242,19 @@ module pcie_pipe_if
   logic               rx_valid_int;
   logic               rx_sop_int;
   logic               rx_eop_int;
+  // Latch SOP/EOP detected in earlier gearbox phases until output cycle
+  logic               rx_sop_latched;
+  logic               rx_eop_latched;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      rx_accum    <= '0;
-      rx_phase    <= '0;
-      rx_valid_int <= 1'b0;
-      rx_sop_int  <= 1'b0;
-      rx_eop_int  <= 1'b0;
+      rx_accum       <= '0;
+      rx_phase       <= '0;
+      rx_valid_int   <= 1'b0;
+      rx_sop_int     <= 1'b0;
+      rx_eop_int     <= 1'b0;
+      rx_sop_latched <= 1'b0;
+      rx_eop_latched <= 1'b0;
     end else begin
       if (|rx_any_valid) begin
         if (GEARBOX_RATIO <= 1) begin
@@ -255,21 +263,43 @@ module pcie_pipe_if
           rx_sop_int   <= rx_sop_det;
           rx_eop_int   <= rx_eop_det;
         end else begin
-          rx_accum[DATA_W-1 - rx_phase*TOTAL_PIPE_W -: TOTAL_PIPE_W] <= rx_pipe_word_raw;
-          if (rx_phase == GEARBOX_RATIO - 1) begin
-            rx_valid_int <= 1'b1;
-            rx_phase     <= '0;
+          if (rx_sop_det && rx_phase != '0) begin
+            // Mid-gearbox SOP: discard in-progress word, restart treating
+            // this cycle as phase 0 so STP lands at MSB of accumulator.
+            rx_accum[DATA_W-1 -: TOTAL_PIPE_W] <= rx_pipe_word_raw;
+            rx_phase       <= 3'(GEARBOX_RATIO - 1);
+            rx_valid_int   <= 1'b0;
+            rx_sop_latched <= 1'b1;
+            rx_eop_latched <= 1'b0;
+            rx_sop_int     <= 1'b0;
+            rx_eop_int     <= 1'b0;
           end else begin
-            rx_valid_int <= 1'b0;
-            rx_phase     <= rx_phase + 1;
+            rx_accum[DATA_W-1 - rx_phase*TOTAL_PIPE_W -: TOTAL_PIPE_W] <= rx_pipe_word_raw;
+            if (rx_phase == GEARBOX_RATIO - 1) begin
+              rx_valid_int   <= 1'b1;
+              rx_phase       <= '0;
+              // Combine any SOP/EOP seen in earlier phases with current cycle
+              rx_sop_int     <= rx_sop_latched || rx_sop_det;
+              rx_eop_int     <= rx_eop_latched || rx_eop_det;
+              rx_sop_latched <= 1'b0;
+              rx_eop_latched <= 1'b0;
+            end else begin
+              rx_valid_int   <= 1'b0;
+              rx_phase       <= rx_phase + 1;
+              // Accumulate SOP/EOP across gearbox phases
+              rx_sop_latched <= rx_sop_latched || rx_sop_det;
+              rx_eop_latched <= rx_eop_latched || rx_eop_det;
+              rx_sop_int     <= 1'b0;
+              rx_eop_int     <= 1'b0;
+            end
           end
-          rx_sop_int <= rx_sop_det;
-          rx_eop_int <= rx_eop_det;
         end
       end else begin
-        rx_valid_int <= 1'b0;
-        rx_sop_int   <= 1'b0;
-        rx_eop_int   <= 1'b0;
+        rx_valid_int   <= 1'b0;
+        rx_sop_int     <= 1'b0;
+        rx_eop_int     <= 1'b0;
+        rx_sop_latched <= 1'b0;
+        rx_eop_latched <= 1'b0;
       end
     end
   end

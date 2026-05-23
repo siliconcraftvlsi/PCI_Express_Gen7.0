@@ -8,6 +8,8 @@ package pcie_uvm_pkg;
 
   import uvm_pkg::*;
   `include "uvm_macros.svh"
+  import pcie_pipe_agent_pkg::*;
+  import pcie_ltssm_cov_pkg::*;
 
   class pcie_axi_seq_item extends uvm_sequence_item;
     rand bit                  is_write;
@@ -252,9 +254,11 @@ package pcie_uvm_pkg;
   class pcie_env extends uvm_env;
     `uvm_component_utils(pcie_env)
 
-    pcie_axi_agent  axi_agent;
-    pcie_scoreboard sb;
-    pcie_coverage   cov;
+    pcie_axi_agent                    axi_agent;
+    pcie_pipe_agent #(4, 32)          pipe_agent;
+    pcie_scoreboard                   sb;
+    pcie_coverage                     cov;
+    pcie_ltssm_cov #(4, 32)           ltssm_cov;
 
     function new(string name = "pcie_env", uvm_component parent = null);
       super.new(name, parent);
@@ -262,15 +266,20 @@ package pcie_uvm_pkg;
 
     function void build_phase(uvm_phase phase);
       super.build_phase(phase);
-      axi_agent = pcie_axi_agent::type_id::create("axi_agent", this);
-      sb = pcie_scoreboard::type_id::create("sb", this);
-      cov = pcie_coverage::type_id::create("cov", this);
+      uvm_config_db#(uvm_active_passive_enum)::set(
+        this, "pipe_agent", "is_active", UVM_PASSIVE);
+      axi_agent  = pcie_axi_agent::type_id::create("axi_agent", this);
+      pipe_agent = pcie_pipe_agent#(4, 32)::type_id::create("pipe_agent", this);
+      sb         = pcie_scoreboard::type_id::create("sb", this);
+      cov        = pcie_coverage::type_id::create("cov", this);
+      ltssm_cov  = pcie_ltssm_cov#(4, 32)::type_id::create("ltssm_cov", this);
     endfunction
 
     function void connect_phase(uvm_phase phase);
       super.connect_phase(phase);
       axi_agent.mon.ap.connect(sb.imp);
       axi_agent.mon.ap.connect(cov.analysis_export);
+      pipe_agent.mon.ap.connect(ltssm_cov.analysis_export);
     endfunction
   endclass
 

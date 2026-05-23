@@ -1,0 +1,125 @@
+# =============================================================================
+# PCIe 7.0 Controller - Unified Power Format (IEEE 1801 / UPF)
+# =============================================================================
+# Power domains:
+#   PD_CORE  — main logic, core_clk domain (always-on)
+#   PD_PIPE  — PIPE/PHY interface, pipe_clk domain (always-on)
+#   PD_AUX   — power-management aux domain, aux_clk (retention/shutdown)
+#
+# Supply sets:
+#   VDD_CORE — 1.0 V nominal
+#   VDD_PIPE — 1.0 V (may differ per PHY)
+#   VDD_AUX  — 0.9 V (low-power auxiliary)
+#   VSS      — ground
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Supply ports (top-level)
+# ---------------------------------------------------------------------------
+create_supply_port VDD_CORE
+create_supply_port VDD_PIPE
+create_supply_port VDD_AUX
+create_supply_port VSS
+
+# ---------------------------------------------------------------------------
+# Supply nets
+# ---------------------------------------------------------------------------
+create_supply_net  VDD_CORE_NET
+create_supply_net  VDD_PIPE_NET
+create_supply_net  VDD_AUX_NET
+create_supply_net  VSS_NET
+
+connect_supply_net VDD_CORE_NET -ports {VDD_CORE}
+connect_supply_net VDD_PIPE_NET -ports {VDD_PIPE}
+connect_supply_net VDD_AUX_NET  -ports {VDD_AUX}
+connect_supply_net VSS_NET      -ports {VSS}
+
+# ---------------------------------------------------------------------------
+# Power domains
+# ---------------------------------------------------------------------------
+create_power_domain PD_CORE \
+  -elements { \
+    u_ltssm u_dll_tx u_dll_rx u_flow_ctrl \
+    u_tlp_tx u_tlp_rx u_cfg_space \
+    u_axi_bridge u_dma u_cpl_timeout \
+  } \
+  -supply { primary VDD_CORE_NET } \
+  -supply { ground  VSS_NET }
+
+create_power_domain PD_PIPE \
+  -elements { u_pipe_if } \
+  -supply { primary VDD_PIPE_NET } \
+  -supply { ground  VSS_NET }
+
+create_power_domain PD_AUX \
+  -elements { u_pm_ctrl } \
+  -supply { primary VDD_AUX_NET } \
+  -supply { ground  VSS_NET }
+
+# ---------------------------------------------------------------------------
+# Power state tables
+# ---------------------------------------------------------------------------
+# PD_CORE states
+add_power_state PD_CORE -state {ON       {supply_expr {VDD_CORE_NET == `{FULL_ON, 1.0}}}}
+add_power_state PD_CORE -state {OFF      {supply_expr {VDD_CORE_NET == `{OFF}}}}
+
+# PD_PIPE states
+add_power_state PD_PIPE -state {ON       {supply_expr {VDD_PIPE_NET == `{FULL_ON, 1.0}}}}
+add_power_state PD_PIPE -state {OFF      {supply_expr {VDD_PIPE_NET == `{OFF}}}}
+
+# PD_AUX states (active during L1/L2)
+add_power_state PD_AUX -state  {ON       {supply_expr {VDD_AUX_NET == `{FULL_ON, 0.9}}}}
+add_power_state PD_AUX -state  {RETAIN   {supply_expr {VDD_AUX_NET == `{FULL_ON, 0.9}}}}
+add_power_state PD_AUX -state  {OFF      {supply_expr {VDD_AUX_NET == `{OFF}}}}
+
+# System power state table
+create_pst sys_pst -supplies {VDD_CORE_NET VDD_PIPE_NET VDD_AUX_NET}
+add_pst_state L0_ACTIVE  -pst sys_pst -state {ON  ON  ON}
+add_pst_state L1_SLEEP   -pst sys_pst -state {ON  OFF ON}   ;# PIPE powered down
+add_pst_state L2_DEEP    -pst sys_pst -state {OFF OFF ON}   ;# Core powered down
+
+# ---------------------------------------------------------------------------
+# Isolation cells (output from PD_CORE crossing to PD_AUX / PD_PIPE)
+# ---------------------------------------------------------------------------
+set_isolation iso_core_to_aux \
+  -domain      PD_CORE \
+  -isolation_power_net  VDD_AUX_NET \
+  -isolation_ground_net VSS_NET \
+  -clamp_value 0 \
+  -applies_to  outputs \
+  -sink_domains {PD_AUX}
+
+set_isolation iso_core_to_pipe \
+  -domain      PD_CORE \
+  -isolation_power_net  VDD_PIPE_NET \
+  -isolation_ground_net VSS_NET \
+  -clamp_value 0 \
+  -applies_to  outputs \
+  -sink_domains {PD_PIPE}
+
+# ---------------------------------------------------------------------------
+# Retention registers (PD_AUX: retain PM state across L1)
+# ---------------------------------------------------------------------------
+set_retention ret_aux \
+  -domain        PD_AUX \
+  -retention_power_net  VDD_AUX_NET \
+  -retention_ground_net VSS_NET \
+  -save_condition  {pm_state_l1 || pm_state_l2} \
+  -restore_condition {!pm_state_l1 && !pm_state_l2}
+
+# ---------------------------------------------------------------------------
+# Level shifters (VDD_CORE → VDD_AUX or VDD_PIPE crossings)
+# ---------------------------------------------------------------------------
+set_level_shifter ls_core_to_aux \
+  -domain      PD_CORE \
+  -applies_to  outputs \
+  -sink_domains {PD_AUX} \
+  -input_supply_set  VDD_CORE_NET \
+  -output_supply_set VDD_AUX_NET
+
+set_level_shifter ls_pipe_to_core \
+  -domain      PD_PIPE \
+  -applies_to  outputs \
+  -sink_domains {PD_CORE} \
+  -input_supply_set  VDD_PIPE_NET \
+  -output_supply_set VDD_CORE_NET

@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // -----------------------------------------------------------------------------
 // Author  : Robert Kingsly Amalathas
 // Email   : robertk@microprocessorlab.com
@@ -63,6 +65,12 @@ module axi_master_bfm #(
   output logic                  m_rready
 );
 
+  int error_count;
+  logic [ADDR_W-1:0]   cmd_addr;
+  logic [DATA_W-1:0]   cmd_wdata;
+  logic [DATA_W-1:0]   cmd_rdata;
+  logic [AXI_ID_W-1:0] cmd_id;
+
   // ---------------------------------------------------------------------------
   // Default idle state
   // ---------------------------------------------------------------------------
@@ -85,16 +93,25 @@ module axi_master_bfm #(
     m_arburst = 2'b01;
     m_arvalid = 1'b0;
     m_rready  = 1'b1;
+    error_count = 0;
+    cmd_addr = '0;
+    cmd_wdata = '0;
+    cmd_rdata = '0;
+    cmd_id = '0;
   end
 
   // ---------------------------------------------------------------------------
   // Task: axi_write (single beat)
   // ---------------------------------------------------------------------------
-  task automatic axi_write(
-    input  logic [ADDR_W-1:0]   addr,
-    input  logic [DATA_W-1:0]   data,
-    input  logic [AXI_ID_W-1:0] id = '0
-  );
+  task automatic axi_write;
+    logic [ADDR_W-1:0]   addr;
+    logic [DATA_W-1:0]   data;
+    logic [AXI_ID_W-1:0] id;
+    int timeout;
+    begin
+    addr = cmd_addr;
+    data = cmd_wdata;
+    id   = cmd_id;
     // AW channel
     @(posedge clk);
     m_awid    <= id;
@@ -104,7 +121,17 @@ module axi_master_bfm #(
     m_awburst <= 2'b01;
     m_awvalid <= 1'b1;
     @(posedge clk);
-    while (!m_awready) @(posedge clk);
+    timeout = 0;
+    while (!m_awready && timeout < 10000) begin
+      @(posedge clk);
+      timeout++;
+    end
+    if (!m_awready) begin
+      $display("[AXI-BFM] ERROR: AWREADY timeout at addr=%0h", addr);
+      m_awvalid <= 1'b0;
+      error_count++;
+      disable axi_write;
+    end
     m_awvalid <= 1'b0;
 
     // W channel
@@ -113,14 +140,35 @@ module axi_master_bfm #(
     m_wlast  <= 1'b1;
     m_wvalid <= 1'b1;
     @(posedge clk);
-    while (!m_wready) @(posedge clk);
+    timeout = 0;
+    while (!m_wready && timeout < 10000) begin
+      @(posedge clk);
+      timeout++;
+    end
+    if (!m_wready) begin
+      $display("[AXI-BFM] ERROR: WREADY timeout at addr=%0h", addr);
+      m_wvalid <= 1'b0;
+      error_count++;
+      m_wlast  <= 1'b0;
+      disable axi_write;
+    end
     m_wvalid <= 1'b0;
     m_wlast  <= 1'b0;
 
     // Wait for B channel response
-    while (!m_bvalid) @(posedge clk);
+    timeout = 0;
+    while (!m_bvalid && timeout < 10000) begin
+      @(posedge clk);
+      timeout++;
+    end
+    if (!m_bvalid) begin
+      $display("[AXI-BFM] ERROR: BVALID timeout at addr=%0h", addr);
+      error_count++;
+      disable axi_write;
+    end
     if (m_bresp != 2'b00)
       $display("[AXI-BFM] WARNING: Write response SLVERR/DECERR at addr=%0h", addr);
+    end
   endtask
 
   // ---------------------------------------------------------------------------
@@ -129,7 +177,7 @@ module axi_master_bfm #(
   task automatic axi_write_burst(
     input  logic [ADDR_W-1:0]   addr,
     input  logic [DATA_W-1:0]   data [],    // Dynamic array of data beats
-    input  logic [AXI_ID_W-1:0] id = '0
+    input  logic [AXI_ID_W-1:0] id
   );
     int beats;
     beats = data.size();
@@ -165,11 +213,14 @@ module axi_master_bfm #(
   // ---------------------------------------------------------------------------
   // Task: axi_read (single beat, returns data)
   // ---------------------------------------------------------------------------
-  task automatic axi_read(
-    input  logic [ADDR_W-1:0]   addr,
-    output logic [DATA_W-1:0]   data,
-    input  logic [AXI_ID_W-1:0] id = '0
-  );
+  task automatic axi_read;
+    logic [ADDR_W-1:0]   addr;
+    logic [AXI_ID_W-1:0] id;
+    int timeout;
+    begin
+    addr = cmd_addr;
+    id   = cmd_id;
+    cmd_rdata = '0;
     @(posedge clk);
     m_arid    <= id;
     m_araddr  <= addr;
@@ -178,15 +229,112 @@ module axi_master_bfm #(
     m_arburst <= 2'b01;
     m_arvalid <= 1'b1;
     @(posedge clk);
-    while (!m_arready) @(posedge clk);
+    timeout = 0;
+    while (!m_arready && timeout < 10000) begin
+      @(posedge clk);
+      timeout++;
+    end
+    if (!m_arready) begin
+      $display("[AXI-BFM] ERROR: ARREADY timeout at addr=%0h", addr);
+      m_arvalid <= 1'b0;
+      error_count++;
+      disable axi_read;
+    end
     m_arvalid <= 1'b0;
 
     m_rready <= 1'b1;
-    while (!m_rvalid) @(posedge clk);
-    data = m_rdata;
+    timeout = 0;
+`ifdef PCIE_STRICT_LAYERS
+    while (!m_rvalid && timeout < 500000) begin
+`elsif PCIE_PIPE_LAYER_EN
+    while (!m_rvalid && timeout < 500000) begin
+`else
+    while (!m_rvalid && timeout < 100000) begin
+`endif
+      @(posedge clk);
+      timeout++;
+    end
+    if (!m_rvalid) begin
+      $display("[AXI-BFM] ERROR: RVALID timeout at addr=%0h", addr);
+      error_count++;
+      disable axi_read;
+    end
+    cmd_rdata = m_rdata;
     if (m_rresp != 2'b00)
       $display("[AXI-BFM] WARNING: Read response error at addr=%0h", addr);
     @(posedge clk);
+    end
+  endtask
+
+  // Issue AR only (no R wait) — for cpl-timeout tests without fork/join
+  task automatic axi_read_issue_only;
+    logic [ADDR_W-1:0]   addr;
+    logic [AXI_ID_W-1:0] id;
+    int timeout;
+    begin
+      addr = cmd_addr;
+      id   = cmd_id;
+      @(posedge clk);
+      m_arid    <= id;
+      m_araddr  <= addr;
+      m_arlen   <= 8'd0;
+      m_arsize  <= 3'b101;
+      m_arburst <= 2'b01;
+      m_arvalid <= 1'b1;
+      @(posedge clk);
+      timeout = 0;
+      while (!m_arready && timeout < 10000) begin
+        @(posedge clk);
+        timeout++;
+      end
+      if (!m_arready) begin
+        $display("[AXI-BFM] ERROR: ARREADY timeout at addr=%0h", addr);
+        m_arvalid <= 1'b0;
+        error_count++;
+        disable axi_read_issue_only;
+      end
+      m_arvalid <= 1'b0;
+      m_rready  <= 1'b1;
+    end
+  endtask
+
+  // Issue AW/W only (no B wait) — for ordering / FC stress tests
+  task automatic axi_write_issue_only;
+    logic [ADDR_W-1:0]   addr;
+    logic [DATA_W-1:0]   data;
+    logic [AXI_ID_W-1:0] id;
+    int timeout;
+    begin
+      addr = cmd_addr;
+      data = cmd_wdata;
+      id   = cmd_id;
+      @(posedge clk);
+      m_awid    <= id;
+      m_awaddr  <= addr;
+      m_awlen   <= 8'd0;
+      m_awsize  <= 3'b101;
+      m_awburst <= 2'b01;
+      m_awvalid <= 1'b1;
+      @(posedge clk);
+      timeout = 0;
+      while (!m_awready && timeout < 10000) begin
+        @(posedge clk);
+        timeout++;
+      end
+      m_awvalid <= 1'b0;
+      m_wdata   <= data;
+      m_wstrb   <= '1;
+      m_wlast   <= 1'b1;
+      m_wvalid  <= 1'b1;
+      @(posedge clk);
+      timeout = 0;
+      while (!m_wready && timeout < 10000) begin
+        @(posedge clk);
+        timeout++;
+      end
+      m_wvalid <= 1'b0;
+      m_wlast  <= 1'b0;
+    end
   endtask
 
   // ---------------------------------------------------------------------------
@@ -196,7 +344,7 @@ module axi_master_bfm #(
     input  logic [ADDR_W-1:0]   addr,
     input  int                  beats,
     output logic [DATA_W-1:0]   data [],
-    input  logic [AXI_ID_W-1:0] id = '0
+    input  logic [AXI_ID_W-1:0] id
   );
     data = new[beats];
     @(posedge clk);

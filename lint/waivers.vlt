@@ -1,0 +1,10 @@
+# Verilator/lint waiver file for PCI Express Gen7 Controller.
+# Keep this file intentionally small. Every waiver must include:
+# - warning ID
+# - file/line or module
+# - reason
+# - owner
+# - review date
+#
+# Example:
+# lint_off UNUSED rtl/example.sv:10 reason=Reserved field owner=design review=2026-05-21

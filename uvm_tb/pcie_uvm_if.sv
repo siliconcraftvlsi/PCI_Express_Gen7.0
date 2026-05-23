@@ -4,6 +4,8 @@
 // LinkedIn: www.linkedin.com/in/robertkingslya
 // -----------------------------------------------------------------------------
 
+`include "pcie_pkg.sv"
+
 interface pcie_axi_if #(
   parameter int DATA_W = 256,
   parameter int ADDR_W = 64,
@@ -81,6 +83,8 @@ interface pcie_ctrl_if #(
   input logic rst_n
 );
 
+  import pcie_pkg::*;
+
   logic              dma_start;
   logic [ADDR_W-1:0] dma_src_addr;
   logic [ADDR_W-1:0] dma_dst_addr;
@@ -91,6 +95,27 @@ interface pcie_ctrl_if #(
 
   logic              intx_assert;
   logic              link_up;
+  ltssm_state_e      ltssm_state;
+
+  // Error-injection controls (UVM sequences drive; partner/BFM may observe)
+  logic              inject_nak;
+  logic              block_ack;
+  logic              inject_malformed_tlp;
+  logic              inject_poison;
+  logic              block_cpl;
+  bit                auto_cpld_en;
+
+  // TB/UVM feature hooks (wired to DUT tb_* ports in uvm_top)
+  logic              tb_sw_req_l1;
+  logic              tb_pm_req_ack;
+  logic              tb_sim_int_override;
+  logic              tb_sim_msi_en;
+  logic              tb_sim_msix_en;
+  logic              pm_state_l0s;
+  logic              pm_state_l1;
+  logic              msix_irq_obs;
+  logic              msi_irq_obs;
+  logic              cfg_err_cor_obs;
 
   task automatic init_ctrl();
     dma_start    = 1'b0;
@@ -99,6 +124,18 @@ interface pcie_ctrl_if #(
     dma_length   = '0;
     dma_dir      = 1'b0;
     intx_assert  = 1'b0;
+    inject_nak   = 1'b0;
+    block_ack    = 1'b0;
+    inject_malformed_tlp = 1'b0;
+    inject_poison        = 1'b0;
+    block_cpl    = 1'b0;
+    auto_cpld_en = 1'b1;
+    tb_sw_req_l1 = 1'b0;
+    tb_pm_req_ack = 1'b0;
+    tb_sim_int_override = 1'b0;
+    tb_sim_msi_en = 1'b0;
+    tb_sim_msix_en = 1'b0;
+    ltssm_state  = DETECT_QUIET;
   endtask
 
   task automatic pulse_dma(

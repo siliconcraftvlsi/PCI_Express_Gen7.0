@@ -7,3 +7,14 @@ build/*.vcd
 build/*.vvp
 build/uvm/
 build/verilator/
+
+# UVM run logs
+uvm_tb/logs/
+
+# LaTeX build artifacts
+docs/latex/*.aux
+docs/latex/*.log
+docs/latex/*.out
+docs/latex/*.lof
+docs/latex/*.lot
+docs/latex/*.toc

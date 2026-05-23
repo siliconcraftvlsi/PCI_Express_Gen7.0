@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IP-XACT 2014 (IEEE 1685-2014) Component Description
+  PCIe 7.0 Controller IP
+  Vendor: SiliconCraft
+  Version: 0.1.0
+-->
+<spirit:component
+  xmlns:spirit="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009
+                      http://www.spiritconsortium.org/XMLSchema/SPIRIT/1685-2009/index.xsd">
+
+  <!-- =====================================================================
+       Component Identity
+  ====================================================================== -->
+  <spirit:vendor>SiliconCraft</spirit:vendor>
+  <spirit:library>pcie</spirit:library>
+  <spirit:name>pcie_controller_top</spirit:name>
+  <spirit:version>0.1.0</spirit:version>
+
+  <!-- =====================================================================
+       Bus Interfaces
+  ====================================================================== -->
+  <spirit:busInterfaces>
+
+    <!-- AXI4 Subordinate (Slave) interface -->
+    <spirit:busInterface>
+      <spirit:name>S_AXI</spirit:name>
+      <spirit:displayName>AXI4 Subordinate</spirit:displayName>
+      <spirit:description>AXI4 slave interface for application→PCIe TLP path</spirit:description>
+      <spirit:busType spirit:vendor="amba.com" spirit:library="AMBA4"
+                      spirit:name="AXI4" spirit:version="r0p0_0"/>
+      <spirit:abstractionType spirit:vendor="amba.com" spirit:library="AMBA4"
+                              spirit:name="AXI4_rtl" spirit:version="r0p0_0"/>
+      <spirit:slave/>
+      <spirit:portMaps>
+        <spirit:portMap><spirit:logicalPort><spirit:name>AWID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_awid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>AWADDR</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_awaddr</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>AWLEN</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_awlen</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>AWVALID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_awvalid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>AWREADY</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_awready</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>WDATA</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_wdata</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>WSTRB</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_wstrb</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>WLAST</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_wlast</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>WVALID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_wvalid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>WREADY</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_wready</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>BID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_bid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>BRESP</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_bresp</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>BVALID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_bvalid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>BREADY</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_bready</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>ARADDR</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_araddr</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>ARVALID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_arvalid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>ARREADY</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_arready</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>RDATA</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_rdata</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>RRESP</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_rresp</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>RVALID</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_rvalid</spirit:name></spirit:physicalPort></spirit:portMap>
+        <spirit:portMap><spirit:logicalPort><spirit:name>RREADY</spirit:name></spirit:logicalPort>
+          <spirit:physicalPort><spirit:name>s_axi_rready</spirit:name></spirit:physicalPort></spirit:portMap>
+      </spirit:portMaps>
+    </spirit:busInterface>
+
+    <!-- AXI4 Manager (Master) interface -->
+    <spirit:busInterface>
+      <spirit:name>M_AXI</spirit:name>
+      <spirit:displayName>AXI4 Manager</spirit:displayName>
+      <spirit:description>AXI4 master interface for PCIe completions→application</spirit:description>
+      <spirit:busType spirit:vendor="amba.com" spirit:library="AMBA4"
+                      spirit:name="AXI4" spirit:version="r0p0_0"/>
+      <spirit:master/>
+    </spirit:busInterface>
+
+  </spirit:busInterfaces>
+
+  <!-- =====================================================================
+       Model — RTL source files
+  ====================================================================== -->
+  <spirit:model>
+    <spirit:views>
+      <spirit:view>
+        <spirit:name>rtl</spirit:name>
+        <spirit:envIdentifier>::</spirit:envIdentifier>
+        <spirit:language>SystemVerilog</spirit:language>
+        <spirit:modelName>pcie_controller_top</spirit:modelName>
+        <spirit:fileSetRef><spirit:localName>rtlSrc</spirit:localName></spirit:fileSetRef>
+      </spirit:view>
+    </spirit:views>
+
+    <spirit:ports>
+      <!-- Clock and Reset -->
+      <spirit:port><spirit:name>core_clk</spirit:name>
+        <spirit:wire><spirit:direction>in</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>core_rst_n</spirit:name>
+        <spirit:wire><spirit:direction>in</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>pipe_clk</spirit:name>
+        <spirit:wire><spirit:direction>in</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>aux_clk</spirit:name>
+        <spirit:wire><spirit:direction>in</spirit:direction></spirit:wire></spirit:port>
+
+      <!-- Status -->
+      <spirit:port><spirit:name>link_up</spirit:name>
+        <spirit:wire><spirit:direction>out</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>msi_irq</spirit:name>
+        <spirit:wire><spirit:direction>out</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>msix_irq</spirit:name>
+        <spirit:wire><spirit:direction>out</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>dma_done</spirit:name>
+        <spirit:wire><spirit:direction>out</spirit:direction></spirit:wire></spirit:port>
+      <spirit:port><spirit:name>dma_error</spirit:name>
+        <spirit:wire><spirit:direction>out</spirit:direction></spirit:wire></spirit:port>
+    </spirit:ports>
+  </spirit:model>
+
+  <!-- =====================================================================
+       Parameters
+  ====================================================================== -->
+  <spirit:parameters>
+    <spirit:parameter>
+      <spirit:name>MAX_GEN</spirit:name>
+      <spirit:displayName>Maximum PCIe Generation</spirit:displayName>
+      <spirit:value spirit:format="long">7</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>NUM_LANES</spirit:name>
+      <spirit:displayName>Number of Lanes</spirit:displayName>
+      <spirit:value spirit:format="long">16</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>DATA_W</spirit:name>
+      <spirit:displayName>Internal Data Width (bits)</spirit:displayName>
+      <spirit:value spirit:format="long">256</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>EN_DMA</spirit:name>
+      <spirit:displayName>Enable DMA Engine</spirit:displayName>
+      <spirit:value spirit:format="bool">true</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>DMA_CHANNELS</spirit:name>
+      <spirit:displayName>Number of DMA Channels</spirit:displayName>
+      <spirit:value spirit:format="long">4</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>VENDOR_ID</spirit:name>
+      <spirit:displayName>PCIe Vendor ID</spirit:displayName>
+      <spirit:value spirit:format="string">0xCAFE</spirit:value>
+    </spirit:parameter>
+    <spirit:parameter>
+      <spirit:name>DEVICE_ID</spirit:name>
+      <spirit:displayName>PCIe Device ID</spirit:displayName>
+      <spirit:value spirit:format="string">0x0001</spirit:value>
+    </spirit:parameter>
+  </spirit:parameters>
+
+  <!-- =====================================================================
+       File Sets
+  ====================================================================== -->
+  <spirit:fileSets>
+    <spirit:fileSet>
+      <spirit:name>rtlSrc</spirit:name>
+      <spirit:file>
+        <spirit:name>rtl/pcie_pkg.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_cdc_sync.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_async_fifo.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_ltssm.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_pipe_if.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_dll_tx.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_dll_rx.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_flow_ctrl.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_tlp_tx.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_tlp_rx.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_cfg_space.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_axi_bridge.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_dma.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_pm_ctrl.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_cpl_timeout.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_controller_top.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:isIncludeFile spirit:inferFrom="false">false</spirit:isIncludeFile>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>rtl/pcie_controller_top.upf</spirit:name>
+        <spirit:fileType>unknown</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>constraints/pcie_controller_top.sdc</spirit:name>
+        <spirit:fileType>SDC</spirit:fileType>
+      </spirit:file>
+    </spirit:fileSet>
+
+    <spirit:fileSet>
+      <spirit:name>svaSrc</spirit:name>
+      <spirit:file>
+        <spirit:name>sva/pcie_ltssm_assertions.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>sva/pcie_dll_assertions.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>sva/pcie_fc_assertions.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>sva/pcie_tlp_assertions.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>sva/pcie_delivery_assertions.sv</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+      </spirit:file>
+    </spirit:fileSet>
+  </spirit:fileSets>
+
+  <!-- =====================================================================
+       Description
+  ====================================================================== -->
+  <spirit:description>
+    PCIe 7.0 Controller IP: full TLP/DLL/PHY stack with AXI4 interface,
+    DMA engine, MSI/MSI-X, AER, power management (L0s/L1/L2),
+    completion timeout, and CDC synchronizers. Parameterized x1-x16,
+    Gen1-Gen7. Includes formal (SymbiYosys), UVM testbench, lint waivers,
+    SDC constraints, and UPF power intent.
+  </spirit:description>
+
+</spirit:component>

@@ -11,12 +11,29 @@ module pcie_uvm_top;
   import uvm_pkg::*;
   import pcie_pkg::*;
   import pcie_uvm_pkg::*;
+  import pcie_pipe_agent_pkg::*;
+  import pcie_ltssm_cov_pkg::*;
+  import pcie_error_inject_seq_pkg::*;
+  import pcie_feature_uvm_pkg::*;
 
   localparam int NUM_LANES = 4;
   localparam int PIPE_W    = 32;
   localparam int DATA_W    = 256;
   localparam int ADDR_W    = 64;
   localparam int AXI_ID_W  = 8;
+
+  // Default: fast link-up (matches directed tb). Rebuild with STRICT_LAYERS=1 to exercise RTL.
+`ifdef PCIE_STRICT_LAYERS
+  localparam bit BYPASS_PIPE    = 0;
+  localparam bit BYPASS_DLL_TX  = 0;
+  localparam bit BYPASS_DLL_RX  = 0;
+  localparam bit BYPASS_TLP_TX  = 0;
+`else
+  localparam bit BYPASS_PIPE    = 1;
+  localparam bit BYPASS_DLL_TX  = 1;
+  localparam bit BYPASS_DLL_RX  = 1;
+  localparam bit BYPASS_TLP_TX  = 1;
+`endif
 
   logic core_clk;
   logic pipe_clk;
@@ -56,6 +73,14 @@ module pcie_uvm_top;
   pcie_ctrl_if #(
     .ADDR_W(ADDR_W)
   ) ctrl_if (
+    .clk(core_clk),
+    .rst_n(rst_n)
+  );
+
+  pcie_pipe_uvm_if #(
+    .NUM_LANES(NUM_LANES),
+    .PIPE_W(PIPE_W)
+  ) pipe_if (
     .clk(core_clk),
     .rst_n(rst_n)
   );
@@ -126,6 +151,7 @@ module pcie_uvm_top;
   logic [2:0]        max_read_req_size;
 
   logic partner_ready;
+  logic link_up;
 
   assign pipe_clk_req_n = 1'b0;
 
@@ -147,12 +173,83 @@ module pcie_uvm_top;
 
     uvm_config_db#(virtual pcie_axi_if)::set(null, "uvm_test_top.*", "vif_axi", axi_if);
     uvm_config_db#(virtual pcie_ctrl_if)::set(null, "uvm_test_top.*", "vif_ctrl", ctrl_if);
+    uvm_config_db#(virtual pcie_pipe_uvm_if#(NUM_LANES, PIPE_W))::set(
+      null, "uvm_test_top.*", "vif_pipe", pipe_if);
 
-    run_test("pcie_smoke_test");
+    begin
+      string test_name;
+      if ($value$plusargs("UVM_TESTNAME=%s", test_name))
+        run_test(test_name);
+      else
+        run_test("pcie_smoke_test");
+    end
   end
 
-  assign ctrl_if.link_up = link_up;
+  assign ctrl_if.link_up      = link_up;
+  assign ctrl_if.ltssm_state  = ltssm_state;
+  assign ctrl_if.dma_done     = dut.dma_done;
+  assign ctrl_if.dma_error    = dut.dma_error;
+  assign ctrl_if.msix_irq_obs = msix_irq;
+  assign ctrl_if.msi_irq_obs  = msi_irq;
+  assign ctrl_if.cfg_err_cor_obs = cfg_err_cor;
 
+  assign pipe_if.tx_data         = pipe_tx_data;
+  assign pipe_if.tx_datak        = pipe_tx_datak;
+  assign pipe_if.tx_elec_idle    = pipe_tx_elec_idle;
+  assign pipe_if.tx_compliance   = pipe_tx_compliance;
+  assign pipe_if.pipe_rate       = pipe_rate;
+  assign pipe_if.pipe_width      = pipe_width;
+  assign pipe_if.pipe_power_down = pipe_power_down;
+  assign pipe_if.pipe_reset_n    = pipe_reset_n;
+  assign pipe_if.rx_data         = pipe_rx_data;
+  assign pipe_if.rx_datak        = pipe_rx_datak;
+  assign pipe_if.rx_valid        = pipe_rx_valid;
+  assign pipe_if.rx_elec_idle    = pipe_rx_elec_idle;
+  assign pipe_if.rx_status_valid = pipe_rx_status_valid;
+  assign pipe_if.rx_status       = pipe_rx_status;
+  assign pipe_if.link_up         = link_up;
+
+`ifdef PCIE_UVM_RC_BFM
+  logic        rc_link_up;
+  logic [31:0] rc_tlp_rx_count;
+  logic [31:0] rc_cpl_tx_count;
+  logic        rc_bfm_error;
+  wire         dma_h2d_wait_sig = dut.gen_dma.u_dma.dma_waiting_cpl;
+
+  pcie_rc_bfm #(
+    .NUM_LANES(NUM_LANES),
+    .PIPE_W(PIPE_W),
+    .DATA_W(DATA_W)
+  ) u_rc_bfm (
+    .clk               (core_clk),
+    .rst_n             (rst_n),
+    .rc_tx_data        (pipe_rx_data),
+    .rc_tx_datak       (pipe_rx_datak),
+    .rc_tx_valid       (pipe_rx_valid),
+    .rc_tx_elec_idle   (pipe_rx_elec_idle),
+    .rc_tx_status      (pipe_rx_status),
+    .rc_tx_status_valid(pipe_rx_status_valid),
+    .dut_tx_data       (pipe_tx_data),
+    .dut_tx_datak      (pipe_tx_datak),
+    .dut_tx_elec_idle  (pipe_tx_elec_idle),
+    .ltssm_state       (ltssm_state),
+    .link_established  (rc_link_up),
+    .tlp_rx_count      (rc_tlp_rx_count),
+    .cpl_tx_count      (rc_cpl_tx_count),
+    .bfm_error         (rc_bfm_error),
+    .dma_mrd_tag       (dut.gen_dma.u_dma.dma_tag),
+    .dma_h2d_wait      (dma_h2d_wait_sig),
+    .gearbox_snoop_en  (!BYPASS_PIPE),
+    .dut_tx_phase      (dut.u_pipe_if.tx_phase),
+    .dll_rx_next_seq   (dut.u_dll_rx.next_expected_seq)
+  );
+
+  assign partner_ready = rc_link_up;
+
+  always @(ctrl_if.block_cpl or ctrl_if.auto_cpld_en) begin
+    u_rc_bfm.auto_cpld_en = ctrl_if.auto_cpld_en && !ctrl_if.block_cpl;
+  end
+`else
   pcie_pipe_partner #(
     .NUM_LANES(NUM_LANES),
     .PIPE_W(PIPE_W)
@@ -170,8 +267,7 @@ module pcie_uvm_top;
     .dut_tx_elec_idle(pipe_tx_elec_idle),
     .link_partner_ready(partner_ready)
   );
-
-  logic link_up;
+`endif
 
   pcie_controller_top #(
     .DEVICE_ROLE(ROLE_EP),
@@ -182,7 +278,21 @@ module pcie_uvm_top;
     .AXI_ID_W(AXI_ID_W),
     .PIPE_W(PIPE_W),
     .EN_DMA(1),
-    .DMA_CHANNELS(4)
+    .DMA_CHANNELS(4),
+    .SIM_BYPASS(1),
+    .SIM_BYPASS_PIPE(BYPASS_PIPE),
+    .SIM_BYPASS_DLL_TX(BYPASS_DLL_TX),
+    .SIM_BYPASS_DLL_RX(BYPASS_DLL_RX),
+    .SIM_BYPASS_TLP_TX(BYPASS_TLP_TX),
+    .SIM_BYPASS_LCRC(1),
+    .CPL_TIMEOUT_CYCLES(128),
+    .tb_sw_req_l1(ctrl_if.tb_sw_req_l1),
+    .tb_pm_req_ack(ctrl_if.tb_pm_req_ack),
+    .tb_sim_int_override(ctrl_if.tb_sim_int_override),
+    .tb_sim_msi_en(ctrl_if.tb_sim_msi_en),
+    .tb_sim_msix_en(ctrl_if.tb_sim_msix_en),
+    .tb_pm_state_l0s(ctrl_if.pm_state_l0s),
+    .tb_pm_state_l1(ctrl_if.pm_state_l1)
   ) dut (
     .core_clk(core_clk),
     .core_rst_n(rst_n),

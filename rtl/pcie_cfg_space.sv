@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // -----------------------------------------------------------------------------
 // Author  : Robert Kingsly Amalathas
 // Email   : robertk@microprocessorlab.com
@@ -64,6 +66,7 @@ module pcie_cfg_space
   // -------------------------------------------------------------------------
   output logic [2:0]        mps,            // Max Payload Size
   output logic [2:0]        mrrs,           // Max Read Request Size
+  output logic              relaxed_order_en,
   output logic              bus_master_en,
   output logic              mem_space_en,
 
@@ -75,6 +78,11 @@ module pcie_cfg_space
   output logic              msix_irq,
   output logic [10:0]       msix_vector,
   input  logic              intx_assert,
+
+  // Simulation-only interrupt mode override (tie off in production)
+  input  logic              sim_int_override,
+  input  logic              sim_msi_en,
+  input  logic              sim_msix_en,
 
   // -------------------------------------------------------------------------
   // Error Inputs
@@ -136,6 +144,14 @@ module pcie_cfg_space
   localparam int DW_MSIX_CAP_HDR   = 40;  // 0x0A0: CapID=0x11
   localparam int DW_MSIX_TABLE_OFF  = 41;  // 0x0A4
   localparam int DW_MSIX_PBA_OFF    = 42;  // 0x0A8
+  // TB/backdoor MSI-X table (4 vectors × 4 DW) and PBA pending shadow
+  localparam int MSIX_TB_BASE_DW    = 128;
+  localparam int MSIX_TB_ENTRIES    = 4;
+  localparam int MSIX_TB_DWNS       = MSIX_TB_ENTRIES * 4;
+  localparam int MSIX_TB_PBA_DW     = 144;
+
+  logic [31:0] msix_table [MSIX_TB_DWNS-1:0];
+  logic [MSIX_TB_ENTRIES-1:0] msix_pba_pending;
 
   // AER Extended Capability at 0x100 (DW 64)
   localparam int DW_AER_CAP_HDR    = 64;  // 0x100: ExtCapID=0x0001
@@ -166,6 +182,7 @@ module pcie_cfg_space
       // BAR0: 64-bit memory BAR
       cfg_space[DW_BAR0]          <= 32'hFFFF_FFF4;   // 64-bit prefetchable
       cfg_space[DW_BAR1]          <= 32'hFFFF_FFFF;
+      cfg_space[DW_BAR2]          <= 32'h0000_000C;   // 32-bit mem BAR for MSI-X table
       cfg_space[DW_CAP_PTR]       <= 32'h0000_0040;   // First capability at 0x40
 
       // PCIe Capability (CapID=0x10)
@@ -185,7 +202,7 @@ module pcie_cfg_space
 
       // MSI Capability (CapID=0x05)
       if (EN_MSI) begin
-        cfg_space[DW_MSI_CAP_HDR] <= 32'h0080_9005;   // CapID=0x05, 32-vector MSI
+        cfg_space[DW_MSI_CAP_HDR] <= 32'h0081_9005;   // CapID=0x05, 32-vector MSI, MSI Enable=1
         cfg_space[DW_MSI_ADDR_LO] <= 32'h0000_0000;
         cfg_space[DW_MSI_DATA]    <= 32'h0000_0000;
       end
@@ -195,6 +212,9 @@ module pcie_cfg_space
         cfg_space[DW_MSIX_CAP_HDR]  <= 32'h07FF_A011;  // 2048 vectors, CapID=0x11
         cfg_space[DW_MSIX_TABLE_OFF] <= 32'h0000_4000;  // Table in BAR2
         cfg_space[DW_MSIX_PBA_OFF]   <= 32'h0001_4000;  // PBA after table
+        for (int t = 0; t < MSIX_TB_DWNS; t++)
+          msix_table[t] <= 32'h0;
+        msix_pba_pending <= '0;
       end
 
       // AER Extended Capability (ExtCapID=0x0001)
@@ -251,19 +271,25 @@ module pcie_cfg_space
           // AER Status (RW1C)
           DW_AER_UNCORR_STS[11:0]: if (EN_AER) cfg_space[DW_AER_UNCORR_STS] <= cfg_space[DW_AER_UNCORR_STS] & ~cfg_wr_data;
           DW_AER_CORR_STS[11:0]:   if (EN_AER) cfg_space[DW_AER_CORR_STS]   <= cfg_space[DW_AER_CORR_STS]   & ~cfg_wr_data;
-          default: ; // Ignore writes to RO registers
+          default: begin
+            if (EN_MSIX && cfg_wr_addr >= MSIX_TB_BASE_DW &&
+                cfg_wr_addr < (MSIX_TB_BASE_DW + MSIX_TB_DWNS))
+              msix_table[int'(cfg_wr_addr - MSIX_TB_BASE_DW)] <= cfg_wr_data;
+            else if (EN_MSIX && cfg_wr_addr == MSIX_TB_PBA_DW)
+              msix_pba_pending <= cfg_wr_data[MSIX_TB_ENTRIES-1:0];
+          end
         endcase
       end
 
       // -----------------------------------------------------------------------
-      // Error Status Update (AER)
+      // Error Status Update (AER) — defer sticky set when same DW is RW1C-cleared
       // -----------------------------------------------------------------------
       if (EN_AER) begin
-        if (err_cor)
+        if (err_cor && !(cfg_wr_valid && (cfg_wr_addr == DW_AER_CORR_STS[11:0])))
           cfg_space[DW_AER_CORR_STS] <= cfg_space[DW_AER_CORR_STS] | 32'h0000_0001;
-        if (err_nonfatal)
+        if (err_nonfatal && !(cfg_wr_valid && (cfg_wr_addr == DW_AER_UNCORR_STS[11:0])))
           cfg_space[DW_AER_UNCORR_STS] <= cfg_space[DW_AER_UNCORR_STS] | 32'h0000_2000;
-        if (err_fatal)
+        if (err_fatal && !(cfg_wr_valid && (cfg_wr_addr == DW_AER_UNCORR_STS[11:0])))
           cfg_space[DW_AER_UNCORR_STS] <= cfg_space[DW_AER_UNCORR_STS] | 32'h0001_0000;
       end
     end
@@ -300,24 +326,44 @@ module pcie_cfg_space
   // ---------------------------------------------------------------------------
   // Decoded outputs
   // ---------------------------------------------------------------------------
-  assign mps          = cfg_space[DW_PCIE_DEV_CTL][7:5];
-  assign mrrs         = cfg_space[DW_PCIE_DEV_CTL][14:12];
-  assign mem_space_en = cfg_space[DW_CMD_STATUS][1];
-  assign bus_master_en= cfg_space[DW_CMD_STATUS][2];
+  assign mps              = cfg_space[DW_PCIE_DEV_CTL][7:5];
+  assign mrrs             = cfg_space[DW_PCIE_DEV_CTL][14:12];
+  assign relaxed_order_en = cfg_space[DW_PCIE_DEV_CTL][4];
+  assign mem_space_en     = cfg_space[DW_CMD_STATUS][1];
+  assign bus_master_en    = cfg_space[DW_CMD_STATUS][2];
 
   // ---------------------------------------------------------------------------
   // Interrupt Generation
   // ---------------------------------------------------------------------------
   // MSI: fire when software writes to MSI pending register
   logic msi_enabled;
-  assign msi_enabled = EN_MSI && cfg_space[DW_MSI_CAP_HDR][16];
+  assign msi_enabled = EN_MSI &&
+                       (sim_int_override ? sim_msi_en : cfg_space[DW_MSI_CAP_HDR][16]);
   assign msi_irq     = msi_enabled && intx_assert;
   assign msi_vector  = 5'd0;  // Single-vector MSI (simplified)
 
-  // MSI-X: fire when software writes to MSI-X table (external logic needed)
+  // MSI-X: table/PBA model with sim-override for legacy TEST 18
   logic msix_enabled;
-  assign msix_enabled = EN_MSIX && cfg_space[DW_MSIX_CAP_HDR][31];
-  assign msix_irq     = msix_enabled && intx_assert && !msi_enabled;
-  assign msix_vector  = 11'd0;  // Vector 0
+  logic        msix_pending_hit;
+  logic [10:0] msix_sel_vector;
+
+  always_comb begin
+    msix_pending_hit = 1'b0;
+    msix_sel_vector  = 11'd0;
+    if (EN_MSIX) begin
+      for (int v = MSIX_TB_ENTRIES - 1; v >= 0; v--) begin
+        if (msix_pba_pending[v] && !msix_table[v * 4 + 3][0]) begin
+          msix_pending_hit = 1'b1;
+          msix_sel_vector  = 11'(v);
+        end
+      end
+    end
+  end
+
+  assign msix_enabled = EN_MSIX &&
+                        (sim_int_override ? sim_msix_en : cfg_space[DW_MSIX_CAP_HDR][31]);
+  assign msix_irq     = msix_enabled && intx_assert && !msi_enabled &&
+                        (sim_int_override ? 1'b1 : msix_pending_hit);
+  assign msix_vector  = sim_int_override ? 11'd0 : msix_sel_vector;
 
 endmodule : pcie_cfg_space
