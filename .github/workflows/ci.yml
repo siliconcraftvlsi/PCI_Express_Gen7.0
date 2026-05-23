@@ -1,0 +1,59 @@
+name: PCIe CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verilator-check:
+    name: Verilator lint + DUT smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Verilator
+        run: sudo apt-get update && sudo apt-get install -y verilator
+      - name: make verilator-check
+        run: make verilator-check
+
+  sim-strict:
+    name: iverilog strict regression (75 checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install iverilog + Verilator
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator
+      - name: make sim-strict
+        run: make sim-strict
+
+  uvm-compile:
+    name: UVM compile (Questa vlog if available)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Try UVM compile
+        run: |
+          if command -v vlog >/dev/null 2>&1; then
+            make -C uvm_tb compile
+          else
+            echo "vlog not available — skipping UVM compile"
+            exit 0
+          fi
+
+  formal:
+    name: SymbiYosys formal proofs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Yosys, solvers, and SymbiYosys
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yosys z3 python3-click git make
+          git clone --depth 1 https://github.com/YosysHQ/sby /tmp/sby
+          make -C /tmp/sby install PREFIX=$HOME/.local
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          sby --version
+      - name: Run formal proofs
+        run: make formal FORMAL_STRICT=1

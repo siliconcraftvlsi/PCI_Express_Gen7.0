@@ -1,0 +1,48 @@
+# =============================================================================
+# SymbiYosys Formal Property Verification — Data Link Layer TX
+# =============================================================================
+# Run from repo root: make formal
+# =============================================================================
+
+[options]
+mode bmc
+depth 5
+
+[engines]
+smtbmc --unroll z3
+
+[script]
+read -sv pcie_pkg.sv
+read -sv pcie_dll_tx.sv
+read -sv pcie_dll_formal_props.sv
+
+read -sv <<EOF
+module bind_dll_sva;
+  bind pcie_dll_tx pcie_dll_formal_props #(
+    .DATA_W(DATA_W)
+  ) u_dll_sva (
+    .clk          (clk),
+    .rst_n        (rst_n),
+    .link_up      (link_up),
+    .tl_tx_data   (tl_tx_data),
+    .tl_tx_valid  (tl_tx_valid),
+    .tl_tx_ready  (tl_tx_ready),
+    .tl_tx_sop    (tl_tx_sop),
+    .tl_tx_eop    (tl_tx_eop),
+    .phy_tx_data  (phy_tx_data),
+    .phy_tx_valid (phy_tx_valid),
+    .phy_tx_sop   (phy_tx_sop),
+    .phy_tx_eop   (phy_tx_eop),
+    .nak_received (nak_received),
+    .ack_seq      (ack_seq),
+    .nak_seq      (nak_seq)
+  );
+endmodule
+EOF
+
+prep -top pcie_dll_tx
+
+[files]
+yosys_rtl/pcie_pkg.sv
+yosys_rtl/pcie_dll_tx.sv
+yosys_rtl/pcie_dll_formal_props.sv

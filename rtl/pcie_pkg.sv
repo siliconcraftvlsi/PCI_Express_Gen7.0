@@ -15,6 +15,8 @@
 
 `ifndef PCIE_PKG_SV
 `define PCIE_PKG_SV
+`timescale 1ns/1ps
+
 
 package pcie_pkg;
 
@@ -189,6 +191,27 @@ package pcie_pkg;
   } ltssm_state_e;
 
   // ---------------------------------------------------------------------------
+  // Data Link Layer States
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    DL_INACTIVE = 2'b00,  // DLL not yet active; waiting for LTSSM CONFIG_IDLE exit
+    DL_INIT     = 2'b01,  // FC initialization exchange in progress
+    DL_ACTIVE   = 2'b10,  // DLL fully operational
+    DL_ERROR    = 2'b11   // DLL error (e.g. excessive NAKs)
+  } dll_state_e;
+
+  // ---------------------------------------------------------------------------
+  // Equalization Phase Encoding (Gen3+ link equalization)
+  // PCIe Base Spec Section 4.2.6
+  // ---------------------------------------------------------------------------
+  typedef enum logic [1:0] {
+    EQ_PHASE0 = 2'b00,  // Preset: transmitter applies preset coefficients
+    EQ_PHASE1 = 2'b01,  // Phase 1: DS port evaluates and requests coefficients
+    EQ_PHASE2 = 2'b10,  // Phase 2: DS port requests final coefficients
+    EQ_PHASE3 = 2'b11   // Phase 3: US port evaluates DS coefficients
+  } eq_phase_e;
+
+  // ---------------------------------------------------------------------------
   // Flow Control Credit Types
   // ---------------------------------------------------------------------------
   typedef enum logic [1:0] {
@@ -206,6 +229,57 @@ package pcie_pkg;
   } fc_credits_t;
 
   // ---------------------------------------------------------------------------
+  // DLLP Packed Structure (48 bits total)
+  //   [47:40] dllp_type  (8 bits)
+  //   [39:16] reserved_or_seq (24 bits; for ACK/NAK bits [27:16] hold seq)
+  //   [15:0]  dlcrc      (16 bits)
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    dllp_type_e  dllp_type;         // 8-bit DLLP type code
+    logic [23:0] reserved_or_seq;   // Sequence/reserved field (type-dependent)
+    logic [15:0] dlcrc;             // 16-bit DL CRC
+  } dllp_t;
+
+  // ---------------------------------------------------------------------------
+  // FC DLLP Structure (48 bits total)
+  //   [47:40] fc_type    (8 bits  — DLLP_FC_INIT_P/NP/CPL or UPD)
+  //   [39:28] hdr_fc     (12 bits — header credit value)
+  //   [27: 8] data_fc    (20 bits — data credit value)
+  //   [ 7: 0] dlcrc_lo   (low 8 bits; upper 8 in separate field, stored as 16)
+  // Practical layout: {fc_type[7:0], hdr_fc[11:0], data_fc[19:0], dlcrc[15:0]}
+  // = 8+12+20+16 = 56 bits — pack as two words; keep in struct for clarity.
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    dllp_type_e  fc_type;    // FC DLLP type (init or update, P/NP/CPL)
+    logic [11:0] hdr_fc;     // Header credit field (12-bit)
+    logic [19:0] data_fc;    // Data credit field (20-bit)
+    logic [15:0] dlcrc;      // 16-bit DL CRC
+  } fc_dllp_t;
+
+  // ---------------------------------------------------------------------------
+  // BAR Configuration Structure
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic [63:0] base_addr;    // Base address (64-bit capable)
+    logic [63:0] mask;         // Address mask (size - 1)
+    logic        prefetchable; // BAR is prefetchable memory
+    logic        mem64;        // BAR is 64-bit memory BAR
+    logic        io_bar;       // BAR is an IO BAR (not memory)
+  } bar_cfg_t;
+
+  // ---------------------------------------------------------------------------
+  // Link Training Status Register
+  // ---------------------------------------------------------------------------
+  typedef struct packed {
+    logic        link_up;            // Link is in L0
+    pcie_gen_e   speed;              // Negotiated PCIe generation
+    logic [4:0]  width;              // Negotiated link width (1,2,4,8,16)
+    logic [2:0]  eq_phase;           // Current equalization phase (0-3)
+    logic        upconfigure_capable;// Link supports upconfigure (width change)
+    logic        retrain_link;       // SW-writable: trigger recovery/retrain
+  } link_train_status_t;
+
+  // ---------------------------------------------------------------------------
   // AXI Transaction Types
   // ---------------------------------------------------------------------------
   typedef enum logic [1:0] {
@@ -221,6 +295,15 @@ package pcie_pkg;
     AXI_RESP_SLVERR  = 2'b10,
     AXI_RESP_DECERR  = 2'b11
   } axi_resp_e;
+
+  // AXI4 AxCACHE encoding constants (AXI4 Spec Table A4-5)
+  localparam logic [3:0] AXI_CACHE_NON_CACHEABLE     = 4'b0000; // Non-bufferable, non-cacheable
+  localparam logic [3:0] AXI_CACHE_BUFFERABLE        = 4'b0001; // Bufferable only
+  localparam logic [3:0] AXI_CACHE_WT_NO_ALLOC       = 4'b0110; // Write-through, no allocate
+  localparam logic [3:0] AXI_CACHE_WB_NO_ALLOC       = 4'b0111; // Write-back, no allocate
+  localparam logic [3:0] AXI_CACHE_WT_RA             = 4'b1110; // Write-through, read-allocate
+  localparam logic [3:0] AXI_CACHE_WB_RA             = 4'b1111; // Write-back, read-allocate (no WA)
+  localparam logic [3:0] AXI_CACHE_WB_RA_WA          = 4'b1111; // Write-back, read+write allocate (full cache)
 
   // ---------------------------------------------------------------------------
   // PIPE Interface Width Encoding
@@ -255,9 +338,9 @@ package pcie_pkg;
   // Error Reporting Types
   // ---------------------------------------------------------------------------
   typedef enum logic [2:0] {
-    ERR_COR  = 3'b000,  // Correctable Error
-    ERR_NONFATAL = 3'b001, // Non-fatal Uncorrectable
-    ERR_FATAL    = 3'b010, // Fatal Uncorrectable
+    ERR_COR      = 3'b000,  // Correctable Error
+    ERR_NONFATAL = 3'b001,  // Non-fatal Uncorrectable
+    ERR_FATAL    = 3'b010,  // Fatal Uncorrectable
     ERR_NONE     = 3'b111
   } pcie_err_type_e;
 
@@ -288,6 +371,19 @@ package pcie_pkg;
   localparam int unsigned FC_UPDATE_TIMER    = 200000;  // ~0.8 ms
   localparam int unsigned LINK_UP_TIMEOUT    = 24'hFFFFFF;
 
+  // Equalization per-phase timeouts (250 MHz clock cycles)
+  // EQ_PHASE1_TIMEOUT = 500,000 cycles = 2 ms  (PCIe spec: 2 ms max)
+  // EQ_PHASE2_TIMEOUT = 500,000 cycles = 2 ms
+  // EQ_PHASE3_TIMEOUT =  12,500 cycles = 50 µs
+  localparam logic [23:0] EQ_PHASE1_TIMEOUT = 24'd500_000;
+  localparam logic [23:0] EQ_PHASE2_TIMEOUT = 24'd500_000;
+  localparam logic [23:0] EQ_PHASE3_TIMEOUT = 24'd12_500;
+
+  // Power management exit latency timeouts
+  localparam logic [23:0] L0S_EXIT_TIMEOUT  = 24'd250;      // ~1 µs
+  localparam logic [23:0] L1_EXIT_TIMEOUT   = 24'd4_000;    // ~16 µs
+  localparam logic [23:0] DLL_INIT_TIMEOUT  = 24'd2_000_000;// 8 ms
+
   // ---------------------------------------------------------------------------
   // Maximum Payload Sizes (encoded as log2(bytes)-7)
   // 000=128B, 001=256B, 010=512B, 011=1024B, 100=2048B, 101=4096B
@@ -315,6 +411,13 @@ package pcie_pkg;
   // ---------------------------------------------------------------------------
   parameter int unsigned MAX_TAGS = 1024;  // 10-bit tags
 
+  // DMA tag allocation window (tags 512-767 reserved for DMA engine)
+  localparam logic [9:0] DMA_TAG_BASE  = 10'd512;
+  localparam logic [9:0] DMA_TAG_LIMIT = 10'd767;
+  // AXI (host-initiated) tag allocation window (tags 0-511)
+  localparam logic [9:0] AXI_TAG_BASE  = 10'd0;
+  localparam logic [9:0] AXI_TAG_LIMIT = 10'd511;
+
   // ---------------------------------------------------------------------------
   // Virtual Channels
   // ---------------------------------------------------------------------------
@@ -332,13 +435,19 @@ package pcie_pkg;
   parameter int unsigned MAX_MSIX_VECTORS = 2048;
 
   // ---------------------------------------------------------------------------
+  // Replay / NAK Limit
+  // 3 consecutive NAKs (or replay-timer expirations) → DL_ERROR
+  // ---------------------------------------------------------------------------
+  localparam logic [3:0] REPLAY_COUNT_MAX = 4'd3;
+
+  // ---------------------------------------------------------------------------
   // Utility Functions
   // ---------------------------------------------------------------------------
 
   // Calculate number of DWs from byte count
   function automatic logic [9:0] bytes_to_dw;
     input logic [11:0] bytes;
-    return (bytes + 3) >> 2;
+    bytes_to_dw = (bytes + 3) >> 2;
   endfunction
 
   // Calculate LCRC-32 (CRC-32 used for TLP LCRC)
@@ -359,6 +468,68 @@ package pcie_pkg;
     end
   endfunction
 
+  // ECRC uses the same CRC-32 polynomial as LCRC (PCIe Base Spec §2.7.1)
+  localparam logic [31:0] ECRC_INIT = LCRC_INIT;
+
+  function automatic logic [31:0] ecrc_update_dw;
+    input logic [31:0] crc_in;
+    input logic [31:0] dw;
+    ecrc_update_dw = calc_lcrc(crc_in, dw);
+  endfunction
+
+  function automatic logic [31:0] ecrc_finalize;
+    input logic [31:0] crc_in;
+    ecrc_finalize = ~crc_in;
+  endfunction
+
+  // Accumulate ECRC over n_dw dwords from the MSB of a DATA_W beat (n_dw in 1..8)
+  function automatic logic [31:0] ecrc_update_beat;
+    input logic [31:0] crc_in;
+    input logic [255:0] beat;
+    input int unsigned n_dw;
+    logic [31:0] crc;
+    int unsigned i;
+    begin
+      crc = crc_in;
+      for (i = 0; i < n_dw; i = i + 1)
+        crc = calc_lcrc(crc, beat[255 - 32*i -: 32]);
+      ecrc_update_beat = crc;
+    end
+  endfunction
+
+  function automatic logic tlp_is_posted_dw0;
+    input tlp_dw0_t dw0;
+    tlp_is_posted_dw0 = dw0.fmt[2];
+  endfunction
+
+  function automatic logic tlp_relaxed_ordering_dw0;
+    input tlp_dw0_t dw0;
+    tlp_relaxed_ordering_dw0 = dw0.attr[1];
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // calc_dlcrc — 16-bit CRC for DLLP validation
+  //   Polynomial: CRC-16/CMS  x^16 + x^15 + x^2 + 1  (0x8005)
+  //   Initial value: 16'hFFFF (DLCRC_INIT)
+  //   Input: first 32 bits of DLLP (type + seq/reserved fields)
+  //   Returns: 16-bit CRC result (no final inversion per PCIe DLL CRC rules)
+  // ---------------------------------------------------------------------------
+  function automatic logic [15:0] calc_dlcrc;
+    input logic [31:0] data;
+    logic [15:0] crc;
+    integer i;
+    begin
+      crc = DLCRC_INIT;
+      for (i = 31; i >= 0; i--) begin
+        if (crc[15] ^ data[i])
+          crc = (crc << 1) ^ 16'h8005;
+        else
+          crc = crc << 1;
+      end
+      calc_dlcrc = crc;
+    end
+  endfunction
+
   // Encode Maximum Read Request Size
   function automatic logic [2:0] encode_mrrs;
     input logic [12:0] size;
@@ -371,6 +542,41 @@ package pcie_pkg;
       13'd4096: encode_mrrs = 3'b101;
       default:  encode_mrrs = 3'b010;  // Default 512B
     endcase
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // mps_to_bytes — decode MPS field (3-bit encoding) to byte count (13-bit)
+  //   Same table as encode_mrrs but inverted direction.
+  // ---------------------------------------------------------------------------
+  function automatic logic [12:0] mps_to_bytes;
+    input logic [2:0] mps;
+    case (mps)
+      3'b000:  mps_to_bytes = 13'd128;
+      3'b001:  mps_to_bytes = 13'd256;
+      3'b010:  mps_to_bytes = 13'd512;
+      3'b011:  mps_to_bytes = 13'd1024;
+      3'b100:  mps_to_bytes = 13'd2048;
+      3'b101:  mps_to_bytes = 13'd4096;
+      default: mps_to_bytes = 13'd128;  // Reserved → minimum
+    endcase
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // is_infinite_hdr_credit — returns 1 when the header credit field encodes
+  //   infinite credits (all-ones, per PCIe Base Spec Section 2.11.1)
+  // ---------------------------------------------------------------------------
+  function automatic logic is_infinite_hdr_credit;
+    input logic [11:0] hdr;
+    is_infinite_hdr_credit = (hdr == 12'hFFF);
+  endfunction
+
+  // ---------------------------------------------------------------------------
+  // is_infinite_data_credit — returns 1 when the data credit field encodes
+  //   infinite credits (all-ones, per PCIe Base Spec Section 2.11.1)
+  // ---------------------------------------------------------------------------
+  function automatic logic is_infinite_data_credit;
+    input logic [19:0] dat;
+    is_infinite_data_credit = (dat == 20'hFFFFF);
   endfunction
 
 endpackage : pcie_pkg

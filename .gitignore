@@ -1,0 +1,9 @@
+# SymbiYosys generated artifacts
+formal/yosys_rtl/
+formal/pcie_*_fpv/
+
+# Simulation build products
+build/*.vcd
+build/*.vvp
+build/uvm/
+build/verilator/

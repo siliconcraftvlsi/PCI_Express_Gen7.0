@@ -1,0 +1,42 @@
+# =============================================================================
+# SymbiYosys Formal Property Verification — LTSSM
+# =============================================================================
+# Run from repo root: make formal
+# Uses Yosys-prep RTL (formal/yosys_rtl/) and immediate assertions (formal/props/).
+# Full SVA in sva/ remains for simulation; see formal/README.md.
+# =============================================================================
+
+[options]
+mode bmc
+depth 10
+
+[engines]
+smtbmc --unroll z3
+
+[script]
+read -sv pcie_pkg.sv
+read -sv pcie_ltssm.sv
+read -sv pcie_ltssm_formal_props.sv
+
+read -sv <<EOF
+module bind_ltssm_sva;
+  bind pcie_ltssm pcie_ltssm_formal_props #(
+    .NUM_LANES(NUM_LANES)
+  ) u_ltssm_sva (
+    .clk              (clk),
+    .rst_n            (rst_n),
+    .ltssm_state      (ltssm_state),
+    .link_up          (link_up),
+    .pipe_reset_n     (pipe_reset_n),
+    .negotiated_gen   (negotiated_gen),
+    .negotiated_width (negotiated_width)
+  );
+endmodule
+EOF
+
+prep -top pcie_ltssm
+
+[files]
+yosys_rtl/pcie_pkg.sv
+yosys_rtl/pcie_ltssm.sv
+yosys_rtl/pcie_ltssm_formal_props.sv

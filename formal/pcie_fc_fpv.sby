@@ -1,0 +1,50 @@
+# =============================================================================
+# SymbiYosys Formal Property Verification — Flow Control
+# =============================================================================
+# Run from repo root: make formal
+# =============================================================================
+
+[options]
+mode bmc
+depth 10
+
+[engines]
+smtbmc --unroll z3
+
+[script]
+read -sv pcie_pkg.sv
+read -sv pcie_flow_ctrl.sv
+read -sv pcie_fc_formal_props.sv
+
+read -sv <<EOF
+module bind_fc_sva;
+  bind pcie_flow_ctrl pcie_fc_formal_props u_fc_sva (
+    .clk              (clk),
+    .rst_n            (rst_n),
+    .link_up          (link_up),
+    .avail_p_hdr      (avail_p.header_credits),
+    .avail_p_dat      (avail_p.data_credits),
+    .avail_np_hdr     (avail_np.header_credits),
+    .avail_np_dat     (avail_np.data_credits),
+    .avail_cpl_hdr    (avail_cpl.header_credits),
+    .avail_cpl_dat    (avail_cpl.data_credits),
+    .consumed_p_hdr   (consumed_p.header_credits),
+    .consumed_p_dat   (consumed_p.data_credits),
+    .consumed_np_hdr  (consumed_np.header_credits),
+    .consumed_np_dat  (consumed_np.data_credits),
+    .consumed_cpl_hdr (consumed_cpl.header_credits),
+    .consumed_cpl_dat (consumed_cpl.data_credits),
+    .fc_update_tx     (fc_update_tx),
+    .fc_rx_valid      (fc_rx_valid),
+    .fc_rx_type       (fc_rx_type),
+    .fc_upd_type      (fc_upd_type)
+  );
+endmodule
+EOF
+
+prep -top pcie_flow_ctrl
+
+[files]
+yosys_rtl/pcie_pkg.sv
+yosys_rtl/pcie_flow_ctrl.sv
+yosys_rtl/pcie_fc_formal_props.sv
